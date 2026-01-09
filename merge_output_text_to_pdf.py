@@ -44,33 +44,37 @@ def main() -> None:
     pdf_files = sorted(p for p in INPUT_PDF_DIR.glob("*.pdf") if p.is_file())
     if not pdf_files:
         raise FileNotFoundError(f"No .pdf files found in: {INPUT_PDF_DIR}")
-    if len(pdf_files) > 1:
-        names = ", ".join(p.name for p in pdf_files)
-        raise FileExistsError(f"Multiple PDFs found in {INPUT_PDF_DIR}: {names}")
 
-    input_pdf_path = pdf_files[0]
-    output_pdf_path = OUTPUT_DIR / f"{input_pdf_path.stem}_synthetic_test_data.pdf"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    if not OUTPUT_DIR.exists():
-        raise FileNotFoundError(f"Missing output directory: {OUTPUT_DIR}")
+    for input_pdf_path in pdf_files:
+        print(f"Merging: {input_pdf_path.name}")
+        pdf_stem = input_pdf_path.stem
+        pdf_output_dir = OUTPUT_DIR / pdf_stem
+        pdf_output_dir.mkdir(parents=True, exist_ok=True)
 
-    text_files = collect_text_files(OUTPUT_DIR)
-    if not text_files:
-        raise FileNotFoundError(f"No .txt files found in: {OUTPUT_DIR}")
+        text_files = collect_text_files(pdf_output_dir)
+        if not text_files:
+            print(f"Skipping {pdf_stem}: no .txt files found.")
+            continue
 
-    doc = fitz.open()
-    for path in text_files:
-        content = path.read_text(encoding="utf-8")
-        add_text_page(doc, content)
+        output_pdf_path = OUTPUT_DIR / f"{pdf_stem}_synthetic_test_data.pdf"
 
-    remove_empty_pages(doc)
+        doc = fitz.open()
+        for path in text_files:
+            content = path.read_text(encoding="utf-8")
+            if content.strip():
+                add_text_page(doc, content)
 
-    output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(output_pdf_path.as_posix())
-    doc.close()
+        remove_empty_pages(doc)
 
-    for path in text_files:
-        path.unlink()
+        if doc.page_count > 0:
+            doc.save(output_pdf_path.as_posix())
+            print(f"Saved: {output_pdf_path}")
+        else:
+            print(f"No content for {pdf_stem}, skipping save.")
+            
+        doc.close()
 
 
 if __name__ == "__main__":

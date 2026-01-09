@@ -5,7 +5,10 @@ import base64
 from pathlib import Path
 
 import fitz  # PyMuPDF
+from dotenv import load_dotenv
 from openai import OpenAI
+
+load_dotenv()
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 INPUT_PDF_DIR = SCRIPT_DIR / "put_your_pdf_here"
@@ -42,62 +45,66 @@ def main() -> None:
     pdf_files = sorted(p for p in INPUT_PDF_DIR.glob("*.pdf") if p.is_file())
     if not pdf_files:
         raise FileNotFoundError(f"No .pdf files found in: {INPUT_PDF_DIR}")
-    if len(pdf_files) > 1:
-        names = ", ".join(p.name for p in pdf_files)
-        raise FileExistsError(f"Multiple PDFs found in {INPUT_PDF_DIR}: {names}")
-
-    input_pdf_path = pdf_files[0]
-
-    ensure_dir(OUTPUT_DIR)
-    ensure_dir(SCREENSHOT_DIR)
 
     client = OpenAI()
-    doc = fitz.open(input_pdf_path.as_posix())
 
-    for page_index in range(doc.page_count):
-        page = doc.load_page(page_index)
-        page_number = page_index + 1
+    for input_pdf_path in pdf_files:
+        print(f"Processing: {input_pdf_path.name}")
+        pdf_stem = input_pdf_path.stem
+        pdf_output_dir = OUTPUT_DIR / pdf_stem
+        pdf_screenshot_dir = SCREENSHOT_DIR / pdf_stem
 
-        txt_path = OUTPUT_DIR / f"page_{page_number:03d}.txt"
-        if txt_path.exists():
-            continue
+        ensure_dir(pdf_output_dir)
+        ensure_dir(pdf_screenshot_dir)
 
-        if not page_has_widgets(page):
-            txt_path.write_text("", encoding="utf-8")
-            continue
+        doc = fitz.open(input_pdf_path.as_posix())
 
-        screenshot_path = SCREENSHOT_DIR / f"page_{page_number:03d}.png"
-        render_page_png(page, screenshot_path)
+        for page_index in range(doc.page_count):
+            page = doc.load_page(page_index)
+            page_number = page_index + 1
 
-        image_b64 = encode_image_base64(screenshot_path)
+            txt_path = pdf_output_dir / f"page_{page_number:03d}.txt"
+            if txt_path.exists():
+                continue
 
-        prompt = (
-            "You are given a screenshot of a PDF form page. "
-            "Return ONLY plain text lines in the format `Field Name: Value` "
-            "for each fillable field visible on this page. "
-            "Generate fictional but realistic synthetic values. "
-            "Do not include fields that are not visible on this page. "
-            "Do not add any extra commentary or formatting."
-        )
+            if not page_has_widgets(page):
+                txt_path.write_text("", encoding="utf-8")
+                continue
 
-        response = client.responses.create(
-            model=MODEL,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": prompt},
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:image/png;base64,{image_b64}",
-                        },
-                    ],
-                }
-            ],
-        )
+            screenshot_path = pdf_screenshot_dir / f"page_{page_number:03d}.png"
+            render_page_png(page, screenshot_path)
 
-        output_text = response.output_text or ""
-        txt_path.write_text(output_text, encoding="utf-8")
+            image_b64 = encode_image_base64(screenshot_path)
+
+            prompt = (
+                "You are given a screenshot of a PDF form page. "
+                "Return ONLY plain text lines in the format `Field Name: Value` "
+                "for each fillable field visible on this page. "
+                "Generate fictional but realistic synthetic values. "
+                "Do not include fields that are not visible on this page. "
+                "Do not add any extra commentary or formatting."
+            )
+
+            response = client.responses.create(
+                model=MODEL,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": prompt},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{image_b64}",
+                            },
+                        ],
+                    }
+                ],
+            )
+
+            output_text = response.output_text or ""
+            txt_path.write_text(output_text, encoding="utf-8")
+        
+        doc.close()
 
 
 if __name__ == "__main__":
